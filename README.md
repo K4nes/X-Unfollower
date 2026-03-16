@@ -125,6 +125,7 @@ If you follow a very large number of accounts, the full scan may take several mi
 - Auth tokens (bearer token, CSRF token, user ID) are read from your browser's cookies and used only to make requests on your behalf — exactly as x.com itself does.
 - All fetched account data is stored in `chrome.storage.local` (your local browser storage only).
 - Sensitive values are automatically redacted from any debug logs.
+- [VirusTotal](https://www.virustotal.com/gui/file/8007fe3841f9b90777fe1f29461f2558843b255c52d6e3a2673835d882409320) Check
 
 ---
 
