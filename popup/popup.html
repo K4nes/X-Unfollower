@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>X Unfollower</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header>
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.63L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z"/>
+      </svg>
+      <div class="logo-text">
+        <span>X Unfollow</span>
+        <span class="logo-credit">by <a href="https://x.com/firsdeka" target="_blank" class="credit-link">@firsdeka</a></span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-refresh-status" class="btn-icon" title="Refresh login status">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Status chip ────────────────────────────────────────────────────── -->
+  <div id="status-bar" class="status-bar status-checking">
+    <span id="status-dot" class="status-dot"></span>
+    <span id="status-text">Checking…</span>
+  </div>
+
+  <!-- ── Main content ───────────────────────────────────────────────────── -->
+  <div id="main-content">
+
+    <!-- Not logged in notice -->
+    <section id="section-not-logged-in" class="hidden">
+      <div class="notice notice-warn">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        <div>
+          <strong>Not logged in to x.com</strong>
+          <p>Open <a href="https://x.com" target="_blank">x.com</a> in this browser, log in, scroll your timeline for a moment, then click the refresh button.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- App (logged in) -->
+    <section id="section-app" class="hidden">
+
+      <!-- Controls -->
+      <div class="controls-bar">
+        <div class="control-group">
+          <label for="select-threshold">Inactive for more than</label>
+          <select id="select-threshold">
+            <option value="30" selected>30 days</option>
+            <option value="90">90 days</option>
+            <option value="180">180 days</option>
+            <option value="365">1 year</option>
+            <option value="custom">Custom…</option>
+          </select>
+          <input id="input-custom-days" type="number" min="1" max="9999" placeholder="days" class="hidden" />
+        </div>
+        <div class="control-group">
+          <button id="btn-fetch" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Load Following
+          </button>
+          <button id="btn-cancel-fetch" class="btn btn-ghost hidden">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div id="progress-area" class="hidden">
+        <div class="progress-bar-track">
+          <div id="progress-bar-fill" class="progress-bar-fill" style="width:0%"></div>
+        </div>
+        <p id="progress-label" class="progress-label">Starting…</p>
+      </div>
+
+      <!-- Stats -->
+      <div id="stats-bar" class="hidden">
+        <div class="stats-counts">
+          <span id="stat-total">0 following</span>
+          <span class="stat-sep">·</span>
+          <span id="stat-selected">0 selected</span>
+        </div>
+        <div class="stats-actions">
+          <button id="btn-select-all" class="btn-link">Select All</button>
+          <button id="btn-deselect-all" class="btn-link">Deselect All</button>
+        </div>
+      </div>
+
+      <!-- View filter tabs -->
+      <div id="view-tabs" class="hidden">
+        <div class="view-tabs-main">
+          <button class="view-tab active" data-view="none">
+            No tweets <span class="tab-count" id="count-none">0</span>
+          </button>
+          <button class="view-tab" data-view="unknown">
+            Unknown <span class="tab-count" id="count-unknown">0</span>
+          </button>
+          <button class="view-tab" data-view="inactive">
+            Inactive <span class="tab-count tab-count-inactive" id="count-inactive">0</span>
+          </button>
+          <button class="view-tab" data-view="active">
+            Active <span class="tab-count" id="count-active">0</span>
+          </button>
+        </div>
+        <div class="view-tabs-sort">
+          <span class="sort-label">Sort:</span>
+          <select id="select-sort" class="sort-select">
+            <option value="inactive-first">Inactive first</option>
+            <option value="oldest-first">Oldest activity</option>
+            <option value="newest-first">Newest activity</option>
+            <option value="followers">Most followers</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Account list -->
+      <div id="list-container">
+        <div id="list-empty" class="empty-state">
+          <p>Click <strong>Load Following</strong> to get started.</p>
+        </div>
+        <div id="list-loading" class="hidden">
+          <div class="skeleton" style="height:52px;margin-bottom:6px"></div>
+          <div class="skeleton" style="height:52px;margin-bottom:6px"></div>
+          <div class="skeleton" style="height:52px;margin-bottom:6px"></div>
+          <div class="skeleton" style="height:52px;margin-bottom:6px"></div>
+        </div>
+        <ul id="account-list"></ul>
+      </div>
+
+      <!-- Unfollow footer -->
+      <footer id="unfollow-footer" class="hidden">
+        <div id="unfollow-progress-area" class="hidden">
+          <div class="progress-bar-track">
+            <div id="unfollow-bar-fill" class="progress-bar-fill progress-bar-red" style="width:0%"></div>
+          </div>
+          <p id="unfollow-label" class="progress-label">Unfollowing…</p>
+        </div>
+        <p class="unfollow-hint">One at a time, 2s apart to avoid rate limits.</p>
+        <div class="footer-actions">
+          <button id="btn-unfollow" class="btn btn-danger" title="Unfollows run one account at a time with a delay">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="22" y1="11" x2="16" y2="11"></line></svg>
+            Unfollow Selected (<span id="unfollow-count">0</span>)
+          </button>
+          <button id="btn-cancel-unfollow" class="btn btn-ghost hidden">Stop</button>
+        </div>
+      </footer>
+
+    </section>
+  </div>
+
+  <!-- ── Toast ──────────────────────────────────────────────────────────── -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

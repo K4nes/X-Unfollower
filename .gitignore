@@ -1,0 +1,29 @@
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# npm / Node (if build tooling is added later)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build output (if a bundler is added later)
+dist/
+build/
+
+# Environment / secrets (never commit these)
+.env
+.env.*
+*.pem
+*.key
+
+# Chrome extension packed file
+*.crx
+*.pem
