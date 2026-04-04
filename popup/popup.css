@@ -2,19 +2,22 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg: #000;
-  --bg-2: #0d0d0d;
-  --bg-3: #181818;
-  --bg-4: #262626;
-  --border: #2f3336;
-  --text: #e7e9ea;
-  --text-muted: #71767b;
-  --accent: #1d9bf0;
-  --accent-hover: #1a8cd8;
-  --danger: #f4212e;
-  --danger-hover: #dc1a26;
-  --warn: #ffd400;
-  --success: #00ba7c;
+  --bg: #09090b;
+  --bg-2: #0a0a0a;
+  --bg-3: #18181b;
+  --bg-4: #27272a;
+  --border: #27272a;
+  --input: #27272a;
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --accent: #0ea5e9;
+  --accent-hover: #38bdf8;
+  --accent-foreground: #020817;
+  --destructive: #ef4444;
+  --destructive-hover: #f87171;
+  --warn: #f59e0b;
+  --success: #22c55e;
+  --ring: #0ea5e9;
   --radius: 10px;
   --radius-sm: 6px;
 }
@@ -122,11 +125,11 @@ header {
 .status-checking .status-dot { background: var(--text-muted); }
 .status-ok .status-dot       { background: var(--success); }
 .status-warn .status-dot     { background: var(--warn); }
-.status-error .status-dot    { background: var(--danger); }
+.status-error .status-dot    { background: var(--destructive); }
 .status-checking #status-text { color: var(--text-muted); }
 .status-ok #status-text       { color: var(--success); }
 .status-warn #status-text     { color: var(--warn); }
-.status-error #status-text    { color: var(--danger); }
+.status-error #status-text    { color: var(--destructive); }
 .status-bar .link-btn {
   margin-left: auto;
   padding: 0 6px;
@@ -170,6 +173,96 @@ section {
 .notice p { color: var(--text-muted); margin-top: 3px; font-size: 12px; }
 .notice a { color: var(--accent); text-decoration: none; }
 .notice a:hover { text-decoration: underline; }
+
+/* ── Guide ────────────────────────────────────────────────────────────────── */
+.guide-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 18px 20px;
+  gap: 20px;
+  overflow-y: auto;
+}
+
+.guide-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.guide-header svg { color: var(--text); }
+
+.guide-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.guide-header p {
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 260px;
+}
+
+.guide-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.guide-step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.guide-step-number {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.guide-step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.guide-step-content strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.guide-step-content p {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.guide-step-content a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.guide-step-content a:hover { text-decoration: underline; }
+
+.guide-cta {
+  margin-top: 4px;
+  padding: 10px 20px;
+  font-size: 14px;
+}
 
 /* ── Controls bar ────────────────────────────────────────────────────────── */
 .controls-bar {
@@ -223,8 +316,8 @@ input[type="number"] { width: 66px; }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 
-.btn-danger { background: var(--danger); color: #fff; }
-.btn-danger:hover:not(:disabled) { background: var(--danger-hover); }
+.btn-danger { background: var(--destructive); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: var(--destructive-hover); }
 
 .btn-ghost {
   background: transparent;
@@ -263,7 +356,7 @@ input[type="number"] { width: 66px; }
   border-radius: 999px;
   transition: width 0.3s ease;
 }
-.progress-bar-red { background: var(--danger); }
+.progress-bar-destructive { background: var(--destructive); }
 .progress-label { color: var(--text-muted); font-size: 11px; }
 
 /* ── Stats bar ───────────────────────────────────────────────────────────── */
@@ -455,8 +548,8 @@ input[type="number"] { width: 66px; }
   border-radius: 999px;
   white-space: nowrap;
 }
-.badge-inactive { background: rgba(255,212,0,0.12); color: var(--warn); }
-.badge-never    { background: rgba(244,33,46,0.12);  color: var(--danger); }
+.badge-inactive { background: rgba(245,158,11,0.12); color: var(--warn); }
+.badge-never    { background: rgba(239,68,68,0.12);  color: var(--destructive); }
 .badge-loading  { background: var(--bg-4); color: var(--text-muted); }
 .badge-muted    { background: var(--bg-4); color: var(--text-muted); }
 

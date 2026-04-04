@@ -1,7 +1,6 @@
 /**
- * popup.js — Side panel logic.
- * Communicates with background.js via chrome.runtime.sendMessage.
- * Displays debug logs from chrome.storage.local in real-time.
+ * popup.js — Side panel UI.
+ * Talks to background.js via chrome.runtime.sendMessage.
  */
 
 // ---------------------------------------------------------------------------
@@ -40,6 +39,7 @@ function startRateLimitCountdown(waitMs, labelPrefix) {
   rateLimitTimer = setInterval(update, 1000);
 }
 let hasLoadedCache = false;
+let hasOnboarded = false;
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -51,7 +51,10 @@ const statusText   = $('status-text');
 const btnRefresh   = $('btn-refresh-status');
 
 const sectionNotLoggedIn = $('section-not-logged-in');
+const sectionGuide       = $('section-guide');
 const sectionApp         = $('section-app');
+
+const btnGuideCheck = $('btn-guide-check');
 
 const selectThreshold  = $('select-threshold');
 const inputCustomDays  = $('input-custom-days');
@@ -91,27 +94,42 @@ const toast = $('toast');
 // ---------------------------------------------------------------------------
 // Messaging — with automatic retry when the service worker was just woken up
 // ---------------------------------------------------------------------------
-function send(type, payload = {}, _retries = 2) {
+/**
+ * @param {object} [opts]
+ * @param {number} [opts.retries=2] Retries when the service worker was just woken up.
+ * @param {number} [opts.timeoutMs=8000] Max wait for sendResponse. Use 0 for no limit
+ *   (required for FETCH_FOLLOWING / ENRICH_ACTIVITY / UNFOLLOW, which routinely exceed 8s).
+ */
+function send(type, payload = {}, opts = {}) {
+  const _retries = opts.retries ?? 2;
+  const timeoutMs = opts.timeoutMs !== undefined ? opts.timeoutMs : 8000;
   return new Promise((resolve) => {
+    const timeout =
+      timeoutMs > 0
+        ? setTimeout(() => resolve(null), timeoutMs)
+        : null;
+    function clearAndResolve(value) {
+      if (timeout) clearTimeout(timeout);
+      resolve(value);
+    }
     function attempt(left) {
       try {
         chrome.runtime.sendMessage(
           { direction: 'FROM_POPUP', type, ...payload },
           (res) => {
             if (chrome.runtime.lastError) {
-              // Service worker was asleep — Chrome just woke it; retry shortly
               if (left > 0) {
                 setTimeout(() => attempt(left - 1), 350);
               } else {
-                resolve(null);
+                clearAndResolve(null);
               }
               return;
             }
-            resolve(res);
+            clearAndResolve(res);
           }
         );
       } catch (_) {
-        resolve(null);
+        clearAndResolve(null);
       }
     }
     attempt(_retries);
@@ -282,7 +300,7 @@ function getViewUsers() {
   return sortUsers(allUsers);
 }
 
-function renderList(users, enriched = false) {
+function renderList(enriched = false) {
   isEnriched = enriched;
   accountList.innerHTML = '';
   const toShow = getViewUsers();
@@ -333,15 +351,14 @@ async function checkLogin() {
   try {
     const res = await send('PING');
     if (!res) {
-      // null response = service worker was recycled mid-call
-      setStatus('warn', 'Panel disconnected — close and reopen it');
-      showToast('Extension context expired. Close and reopen the side panel.', 6000);
+      setStatus('warn', 'Service worker not responding — refresh your x.com tab and try again');
       return;
     }
     if (res.success && res.loggedIn) {
       const tokenLabel = res.tokenReady ? 'token captured ✓' : 'using fallback token';
       setStatus('ok', `Logged in · ${tokenLabel}`);
       sectionNotLoggedIn.classList.add('hidden');
+      sectionGuide.classList.add('hidden');
       sectionApp.classList.remove('hidden');
       if (!hasLoadedCache) {
         await loadCachedData();
@@ -351,11 +368,16 @@ async function checkLogin() {
       const err = res.error || 'Open x.com and log in first.';
       setStatus('error', err);
       sectionApp.classList.add('hidden');
-      sectionNotLoggedIn.classList.remove('hidden');
+      if (!hasOnboarded) {
+        sectionNotLoggedIn.classList.add('hidden');
+        sectionGuide.classList.remove('hidden');
+      } else {
+        sectionNotLoggedIn.classList.remove('hidden');
+        sectionGuide.classList.add('hidden');
+      }
     }
   } catch (e) {
-    setStatus('error', 'Extension error — check debug log');
-    showToast('Could not connect. Try closing and reopening the panel.', 5000);
+    setStatus('error', 'Could not connect — refresh your x.com tab and try again');
   } finally {
     btnRefresh.classList.remove('spinning');
   }
@@ -371,7 +393,7 @@ async function loadCachedData() {
     // Consider enriched if any user has the activityChecked flag or a lastTweetAt date
     const enriched = allUsers.some((u) => u.activityChecked || u.lastTweetAt !== null);
     listLoading.classList.add('hidden');
-    renderList(allUsers, enriched);
+    renderList(enriched);
     if (res.fetchedAt) {
       const mins = Math.round((Date.now() - res.fetchedAt) / 60000);
       const inactiveN = allUsers.filter(isInactive).length;
@@ -403,6 +425,7 @@ async function startFetch() {
   progressArea.classList.remove('hidden');
   progressBarFill.style.width = '0%';
   progressLabel.textContent = 'Fetching following list…';
+  await chrome.storage.local.remove('enrichProgress');
   // Keep existing list visible while the network request runs
 
   startProgressWatcher('fetchProgress', (p) => {
@@ -418,7 +441,7 @@ async function startFetch() {
   });
 
   try {
-    const res = await send('FETCH_FOLLOWING');
+    const res = await send('FETCH_FOLLOWING', {}, { timeoutMs: 0 });
     stopProgressWatcher();
 
     if (!res) {
@@ -442,7 +465,13 @@ async function startFetch() {
     // Render immediately — show known data; accounts still needing a check show no badge
     const hasEnrichedData = merged.some((u) => u.activityChecked !== undefined);
     listLoading.classList.add('hidden');
-    renderList(allUsers, hasEnrichedData);
+    renderList(hasEnrichedData);
+
+    // Mark onboarding complete on first successful fetch
+    if (!hasOnboarded) {
+      hasOnboarded = true;
+      await chrome.storage.local.set({ hasOnboarded: true });
+    }
 
     // Accounts whose last status was a native RT (or had no status) still need one API call
     // to find their last original post. Also retry anyone previously marked Unknown —
@@ -483,6 +512,7 @@ async function startFetch() {
 
 async function startEnrich(users) {
   isEnriching = true;
+  await chrome.storage.local.remove('enrichProgress');
   startProgressWatcher('enrichProgress', (p) => {
     if (p.phase === 'enrich' && p.total > 0) {
       if (rateLimitTimer) { clearInterval(rateLimitTimer); rateLimitTimer = null; }
@@ -502,10 +532,13 @@ async function startEnrich(users) {
   });
 
   try {
-    const res = await send('ENRICH_ACTIVITY', { users });
+    const res = await send('ENRICH_ACTIVITY', { users }, { timeoutMs: 0 });
     stopProgressWatcher();
 
-    if (res?.success) {
+    if (!res) {
+      showToast('Panel disconnected — close and reopen the side panel.', 6000);
+      setStatus('warn', 'Disconnected');
+    } else if (res.success) {
       allUsers = res.users;
       const inactive = allUsers.filter(isInactive).length;
 
@@ -517,13 +550,16 @@ async function startEnrich(users) {
         });
       }
 
-      renderList(allUsers, true);
+      renderList(true);
       progressBarFill.style.width = '100%';
       progressLabel.textContent = `Done — ${inactive} inactive account${inactive !== 1 ? 's' : ''} found.`;
       setStatus('ok', `${allUsers.length} accounts · ${inactive} inactive`);
       setTimeout(() => progressArea.classList.add('hidden'), 3000);
-    } else {
+    } else if (res.cancelled) {
       showToast('Activity check cancelled.', 3000);
+    } else {
+      showToast(res.error || 'Activity check failed.', 6000);
+      setStatus('error', res.error || 'Activity check failed');
     }
   } catch (e) {
     stopProgressWatcher();
@@ -578,7 +614,7 @@ async function startUnfollow() {
   });
 
   try {
-    const res = await send('UNFOLLOW', { userIds: ids });
+    const res = await send('UNFOLLOW', { userIds: ids }, { timeoutMs: 0 });
     stopProgressWatcher();
     const p = res?.progress || {};
     const done = p.done ?? 0;
@@ -594,7 +630,7 @@ async function startUnfollow() {
       if (removedIds.length > 0) {
         await send('REMOVE_UNFOLLOWED', { userIds: removedIds });
         allUsers = allUsers.filter((u) => !removedIds.includes(u.id));
-        renderList(allUsers, true);
+        renderList(true);
       }
 
       unfollowBarFill.style.width = `${Math.round((done / ids.length) * 100)}%`;
@@ -626,7 +662,7 @@ async function startUnfollow() {
     if (successfulIds.length > 0) {
       await send('REMOVE_UNFOLLOWED', { userIds: successfulIds });
       allUsers = allUsers.filter((u) => !successfulIds.includes(u.id));
-      renderList(allUsers, true);
+      renderList(true);
     }
   } catch (e) {
     stopProgressWatcher();
@@ -648,9 +684,9 @@ btnRefresh.addEventListener('click', checkLogin);
 selectThreshold.addEventListener('change', () => {
   const custom = selectThreshold.value === 'custom';
   inputCustomDays.classList.toggle('hidden', !custom);
-  if (!custom) { renderList(allUsers, true); }
+  if (!custom) { renderList(true); }
 });
-inputCustomDays.addEventListener('input', () => renderList(allUsers, true));
+inputCustomDays.addEventListener('input', () => renderList(true));
 
 btnFetch.addEventListener('click', () => { if (!isFetching && !isEnriching) startFetch(); });
 
@@ -677,7 +713,7 @@ document.querySelectorAll('.view-tab').forEach((btn) => {
     document.querySelectorAll('.view-tab').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
     currentView = btn.dataset.view;
-    renderList(allUsers, isEnriched);
+    renderList(isEnriched);
     // Restore scroll to top when switching tabs
     $('list-container').scrollTop = 0;
   });
@@ -686,7 +722,7 @@ document.querySelectorAll('.view-tab').forEach((btn) => {
 // Sort select
 selectSort.addEventListener('change', () => {
   currentSort = selectSort.value;
-  renderList(allUsers, isEnriched);
+  renderList(isEnriched);
   $('list-container').scrollTop = 0;
 });
 
@@ -697,5 +733,37 @@ btnCancelUnfollow.addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Onboarding guide
+// ---------------------------------------------------------------------------
+async function markOnboarded() {
+  hasOnboarded = true;
+  await chrome.storage.local.set({ hasOnboarded: true });
+  sectionGuide.classList.add('hidden');
+  await checkLogin();
+}
+
+btnGuideCheck.addEventListener('click', markOnboarded);
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
+async function init() {
+  try {
+    const stored = await chrome.storage.local.get('hasOnboarded');
+    hasOnboarded = !!stored.hasOnboarded;
+  } catch (_) {
+    hasOnboarded = false;
+  }
+
+  if (hasOnboarded) {
+    setStatus('checking', 'Checking…');
+    await checkLogin();
+  } else {
+    setStatus('ok', 'Ready');
+    sectionNotLoggedIn.classList.add('hidden');
+    sectionGuide.classList.remove('hidden');
+    sectionApp.classList.add('hidden');
+  }
+}
+
+init().catch(() => {});

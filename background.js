@@ -1,11 +1,10 @@
 /**
  * background.js — Manifest V3 Service Worker
  *
- * Responsibilities:
- *  1. Open side panel when toolbar icon is clicked
- *  2. Relay messages between panel.js and content.js
- *  3. Cache the following list in chrome.storage.local
- *  4. Persist debug logs from content.js + background itself
+ * - Side panel on toolbar click
+ * - Relay messages between popup (side panel) and content script
+ * - Cache following list and progress in chrome.storage.local
+ * - Append debug logs to storage (inspect via DevTools → Application if needed)
  */
 
 // ---------------------------------------------------------------------------
@@ -80,6 +79,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== 'loading') return;
   const msgId = activeTabOps.get(tabId);
   if (!msgId) return;
+  if (changeInfo.url) {
+    const isXDomain = changeInfo.url.startsWith('https://x.com') || changeInfo.url.startsWith('https://twitter.com');
+    if (isXDomain) {
+      bgLog('info', 'Tab navigated within x.com — skipping cancel for SPA navigation', { tabId, url: changeInfo.url });
+      return;
+    }
+  }
   bgLog('warn', 'Tab navigated during active operation — cancelling', { tabId, msgId });
   const entry = pendingCallbacks.get(msgId);
   if (entry) {
@@ -90,21 +96,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 // ---------------------------------------------------------------------------
-// Find the x.com tab to use: preferred (if set and valid), else active, else first
+// Pick an x.com tab: active tab if any, otherwise first match
 // ---------------------------------------------------------------------------
 async function getXTab() {
-  const { preferredXTabId } = await chrome.storage.local.get('preferredXTabId');
-  if (preferredXTabId) {
-    try {
-      const tab = await chrome.tabs.get(preferredXTabId);
-      if (tab?.url && (tab.url.startsWith('https://x.com') || tab.url.startsWith('https://twitter.com'))) {
-        return tab;
-      }
-    } catch (_) {
-      await chrome.storage.local.remove('preferredXTabId');
-    }
-  }
-
   const tabs = await chrome.tabs.query({
     url: ['https://x.com/*', 'https://twitter.com/*'],
   });
@@ -177,7 +171,7 @@ function sendToContent(tabId, type, payload = {}, onStream = null) {
 }
 
 // ---------------------------------------------------------------------------
-// Incoming messages: FROM_PAGE (bridge.js) and FROM_POPUP (panel.js)
+// Incoming messages: FROM_PAGE (bridge.js) and FROM_POPUP (popup.js)
 // ---------------------------------------------------------------------------
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.direction === 'FROM_PAGE') {
@@ -339,18 +333,6 @@ async function handlePanelMessage(message, sendResponse) {
         const tab = await getXTab();
         if (tab) await sendToContent(tab.id, 'CANCEL_UNFOLLOW');
         sendResponse({ success: true });
-        break;
-      }
-
-      case 'SET_PREFERRED_TAB': {
-        const { tabId } = message;
-        if (tabId) {
-          await chrome.storage.local.set({ preferredXTabId: tabId });
-          sendResponse({ success: true });
-        } else {
-          await chrome.storage.local.remove('preferredXTabId');
-          sendResponse({ success: true });
-        }
         break;
       }
 

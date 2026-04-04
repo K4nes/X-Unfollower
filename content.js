@@ -22,7 +22,6 @@ const RATE_LIMIT_BACKOFF_MS = 65000;
 // ---------------------------------------------------------------------------
 
 let capturedBearerToken = null;
-let capturedTransactionId = null;
 let cancelFetch = false;
 let cancelUnfollow = false;
 
@@ -172,7 +171,6 @@ async function searchExternalScripts() {
           { prefix: capturedBearerToken.slice(0, 16) + '…' });
       }
       if (txId) {
-        capturedTransactionId = txId;
         dbg('info', 'x-client-transaction-id captured from live page traffic',
           { prefix: txId.slice(0, 16) + '…' });
       }
@@ -537,6 +535,13 @@ async function unfollowQueue(userIds, onProgress) {
           onProgress({ phase: 'rate_limit', waitMs: err.waitMs });
           await sleep(err.waitMs);
           retries++;
+          if (retries >= 3) {
+            failed.push(userId);
+            errors[userId] = 'Rate limited after 3 retries';
+            dbg('error', 'unfollowQueue: rate limited all retries', { userId });
+            onProgress({ phase: 'unfollow_error', userId, error: errors[userId] });
+            await sleep(UNFOLLOW_DELAY_MS);
+          }
         } else {
           const errMsg = err.message || String(err);
           failed.push(userId);

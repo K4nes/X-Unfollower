@@ -43,9 +43,48 @@
       <div class="notice notice-warn">
         <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
         <div>
-          <strong>Not logged in to x.com</strong>
-          <p>Open <a href="https://x.com" target="_blank">x.com</a> in this browser, log in, scroll your timeline for a moment, then click the refresh button.</p>
+          <strong>Session expired</strong>
+          <p>Refresh your x.com tab and click the refresh button to reconnect.</p>
         </div>
+      </div>
+    </section>
+
+    <!-- First-time user guide -->
+    <section id="section-guide" class="hidden">
+      <div class="guide-container">
+        <div class="guide-header">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="36" height="36">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.259 5.63L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z"/>
+          </svg>
+          <h2>Welcome to X Unfollow</h2>
+          <p>Find and unfollow accounts you no longer engage with.</p>
+        </div>
+        <div class="guide-steps">
+          <div class="guide-step">
+            <div class="guide-step-number">1</div>
+            <div class="guide-step-content">
+              <strong>Log in to X</strong>
+              <p>Make sure you're signed into <a href="https://x.com" target="_blank">x.com</a> in this browser.</p>
+            </div>
+          </div>
+          <div class="guide-step">
+            <div class="guide-step-number">2</div>
+            <div class="guide-step-content">
+              <strong>Refresh your X tab</strong>
+              <p>Click the refresh button in your browser or press F5 on the X.com tab to ensure the extension captures your login cookies.</p>
+            </div>
+          </div>
+          <div class="guide-step">
+            <div class="guide-step-number">3</div>
+            <div class="guide-step-content">
+              <strong>Click Load Following</strong>
+              <p>Once refreshed, come back here and click the blue button below.</p>
+            </div>
+          </div>
+        </div>
+        <button id="btn-guide-check" class="btn btn-primary guide-cta">
+          I've done these steps
+        </button>
       </div>
     </section>
 
@@ -140,7 +179,7 @@
       <footer id="unfollow-footer" class="hidden">
         <div id="unfollow-progress-area" class="hidden">
           <div class="progress-bar-track">
-            <div id="unfollow-bar-fill" class="progress-bar-fill progress-bar-red" style="width:0%"></div>
+            <div id="unfollow-bar-fill" class="progress-bar-fill progress-bar-destructive" style="width:0%"></div>
           </div>
           <p id="unfollow-label" class="progress-label">Unfollowing…</p>
         </div>
