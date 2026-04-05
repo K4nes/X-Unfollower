@@ -68,8 +68,7 @@ const progressLabel   = $('progress-label');
 const statsBar    = $('stats-bar');
 const statTotal   = $('stat-total');
 const statSelected= $('stat-selected');
-const btnSelectAll   = $('btn-select-all');
-const btnDeselectAll = $('btn-deselect-all');
+const btnToggleAll = $('btn-toggle-all');
 const viewTabs    = $('view-tabs');
 const countNone     = $('count-none');
 const countUnknown  = $('count-unknown');
@@ -340,6 +339,11 @@ function updateStats() {
   const showFooter = selected > 0 || isUnfollowing;
   unfollowFooter.classList.toggle('hidden', !showFooter);
   if (!isUnfollowing) unfollowProgressArea.classList.add('hidden');
+
+  // Sync toggle-all button label with current selection state
+  const checkboxes = accountList.querySelectorAll('.account-checkbox');
+  const allChecked = checkboxes.length > 0 && Array.from(checkboxes).every((cb) => cb.checked);
+  btnToggleAll.textContent = allChecked ? 'Deselect All' : 'Select All';
 }
 
 // ---------------------------------------------------------------------------
@@ -696,14 +700,17 @@ btnCancelFetch.addEventListener('click', async () => {
   showToast('Fetch cancelled.');
 });
 
-btnSelectAll.addEventListener('click', () => {
-  // Select all accounts currently visible in the active tab
-  accountList.querySelectorAll('.account-checkbox').forEach((cb) => { cb.checked = true; });
-  updateStats();
-});
-btnDeselectAll.addEventListener('click', () => {
-  // Deselect all accounts currently visible in the active tab
-  accountList.querySelectorAll('.account-checkbox').forEach((cb) => { cb.checked = false; });
+btnToggleAll.addEventListener('click', () => {
+  // Toggle between select all / deselect all for accounts currently visible in the active tab
+  const checkboxes = accountList.querySelectorAll('.account-checkbox');
+  const allChecked = Array.from(checkboxes).every((cb) => cb.checked);
+  if (allChecked) {
+    checkboxes.forEach((cb) => { cb.checked = false; });
+    btnToggleAll.textContent = 'Select All';
+  } else {
+    checkboxes.forEach((cb) => { cb.checked = true; });
+    btnToggleAll.textContent = 'Deselect All';
+  }
   updateStats();
 });
 
