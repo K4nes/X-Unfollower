@@ -148,19 +148,6 @@ function sendToContent(tabId, type, payload = {}, onStream = null) {
   return new Promise((resolve, reject) => {
     const id = nextId();
 
-    const isLongOp = type === 'FETCH_FOLLOWING' || type === 'ENRICH_ACTIVITY' || type === 'UNFOLLOW';
-    const timeoutMs = isLongOp ? 0 : (type === 'PING' ? 10000 : 60000);
-
-    let timer = null;
-    if (timeoutMs > 0) {
-      timer = setTimeout(() => {
-        pendingCallbacks.delete(id);
-        if (activeTabOps.get(tabId) === id) activeTabOps.delete(tabId);
-        bgLog('warn', `sendToContent timeout for ${type}`, { tabId, id });
-        reject(new Error(`Operation ${type} timed out`));
-      }, timeoutMs);
-    }
-
     const entry = {
       fn: (reply) => {
         const isStream =
@@ -175,7 +162,6 @@ function sendToContent(tabId, type, payload = {}, onStream = null) {
           return false;
         }
 
-        if (timer) clearTimeout(timer);
         pendingCallbacks.delete(id);
         if (activeTabOps.get(tabId) === id) activeTabOps.delete(tabId);
         if (reply.type === 'ERROR') {
@@ -186,7 +172,6 @@ function sendToContent(tabId, type, payload = {}, onStream = null) {
         return true;
       },
       cancel: () => {
-        if (timer) clearTimeout(timer);
         resolve({ type: 'FETCH_CANCELLED' });
       },
     };
