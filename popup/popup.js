@@ -163,7 +163,7 @@ function getThresholdDays() {
   if (selectThreshold.value === 'custom') {
     return Math.max(1, parseInt(inputCustomDays.value, 10) || 90);
   }
-  return parseInt(selectThreshold.value, 10);
+  return Math.min(3650, Math.max(1, parseInt(selectThreshold.value, 10) || 90));
 }
 
 function isNoTweets(user) {
@@ -175,14 +175,11 @@ function isUnknown(user) {
 }
 
 function isInactive(user) {
-  // Never tweeted at all → separate "No tweets" bucket
   if (user.statusesCount === 0) return false;
-  // Has a confirmed last tweet date — compare against threshold
   if (user.lastTweetAt) {
-    return (Date.now() - new Date(user.lastTweetAt).getTime()) / 86400000 > getThresholdDays();
+    const diffMs = Date.now() - new Date(user.lastTweetAt).getTime();
+    return Math.floor(diffMs / 86400000) > getThresholdDays();
   }
-  // activityChecked but no date: account is restricted, suspended, or all tweets deleted.
-  // We can't determine inactivity without a real date, so leave as unknown.
   return false;
 }
 
@@ -191,12 +188,12 @@ function isInactive(user) {
 // ---------------------------------------------------------------------------
 function formatDate(isoStr) {
   if (!isoStr) return '—';
-  const diff = (Date.now() - new Date(isoStr).getTime()) / 86400000;
-  if (diff < 1)   return 'Today';
-  if (diff < 2)   return 'Yesterday';
-  if (diff < 30)  return `${Math.floor(diff)}d ago`;
-  if (diff < 365) return `${Math.floor(diff / 30)}mo ago`;
-  return `${Math.floor(diff / 365)}y ago`;
+  const days = Math.floor((Date.now() - new Date(isoStr).getTime()) / 86400000);
+  if (days < 1)   return 'Today';
+  if (days < 2)   return 'Yesterday';
+  if (days < 30)  return `${days}d ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
 }
 
 function escHtml(str) {
@@ -207,7 +204,7 @@ function renderBadge(user, enriched) {
   if (!enriched) return `<span class="badge badge-loading">checking…</span>`;
   if (user.statusesCount === 0) return `<span class="badge badge-never">No tweets</span>`;
   if (user.lastTweetAt) {
-    const days = (Date.now() - new Date(user.lastTweetAt).getTime()) / 86400000;
+    const days = Math.floor((Date.now() - new Date(user.lastTweetAt).getTime()) / 86400000);
     return days > getThresholdDays() ? `<span class="badge badge-inactive">Inactive</span>` : '';
   }
   // activityChecked=true but no date → restricted/suspended or all tweets deleted
@@ -222,7 +219,7 @@ function createAccountItem(user, enriched = false) {
   li.dataset.userId = user.id;
   li.innerHTML = `
     <input type="checkbox" class="account-checkbox" data-user-id="${user.id}" />
-    <img class="account-avatar" src="${escHtml(user.profileImageUrl)}" alt="" loading="lazy" onerror="this.style.display='none'" />
+    <img class="account-avatar" src="${escHtml(user.profileImageUrl)}" alt="" loading="lazy" />
     <div class="account-info">
       <span class="account-name">${escHtml(user.name)}</span>
       <a class="account-handle" href="https://x.com/${escHtml(user.screenName)}" target="_blank" rel="noopener noreferrer">@${escHtml(user.screenName)}</a>
@@ -231,6 +228,9 @@ function createAccountItem(user, enriched = false) {
       ${renderBadge(user, enriched)}
       <span class="account-last-tweet">${enriched ? formatDate(user.lastTweetAt) : ''}</span>
     </div>`;
+
+  const avatar = li.querySelector('.account-avatar');
+  avatar.addEventListener('error', () => { avatar.style.display = 'none'; });
 
   li.querySelector('.account-checkbox').addEventListener('change', updateStats);
   li.addEventListener('click', (e) => {
@@ -362,7 +362,8 @@ async function checkLogin() {
     }
     if (res.success && res.loggedIn) {
       const tokenLabel = res.tokenReady ? 'token captured ✓' : 'using fallback token';
-      setStatus('ok', `Logged in · ${tokenLabel}`);
+      const fallbackWarning = res.usingFallback ? ' — token may be outdated, try refreshing x.com' : '';
+      setStatus(res.usingFallback ? 'warn' : 'ok', `Logged in · ${tokenLabel}${fallbackWarning}`);
       sectionNotLoggedIn.classList.add('hidden');
       sectionGuide.classList.add('hidden');
       sectionApp.classList.remove('hidden');

@@ -36,16 +36,30 @@ chrome.alarms.onAlarm.addListener(() => { /* waking up is enough */ });
 // ---------------------------------------------------------------------------
 const MAX_LOGS = 400;
 
-async function appendLog(entry) {
+const logQueue = [];
+let logWriting = false;
+
+async function flushLogQueue() {
+  if (logWriting || logQueue.length === 0) return;
+  logWriting = true;
   try {
+    const batch = logQueue.splice(0, logQueue.length);
     const data = await chrome.storage.local.get('debugLogs');
     const logs = Array.isArray(data.debugLogs) ? data.debugLogs : [];
-    logs.push(entry);
+    logs.push(...batch);
     if (logs.length > MAX_LOGS) logs.splice(0, logs.length - MAX_LOGS);
     await chrome.storage.local.set({ debugLogs: logs });
   } catch (e) {
     console.error('[XUnfollower] Failed to store log:', e);
+  } finally {
+    logWriting = false;
+    if (logQueue.length > 0) flushLogQueue();
   }
+}
+
+function appendLog(entry) {
+  logQueue.push(entry);
+  flushLogQueue();
 }
 
 function bgLog(level, message, data) {
@@ -58,12 +72,23 @@ function bgLog(level, message, data) {
 }
 
 // ---------------------------------------------------------------------------
-// Message ID counter
+// Message ID counter — persisted in session storage to survive SW restarts
 // ---------------------------------------------------------------------------
 let msgCounter = 0;
-function nextId() {
-  return `msg_${++msgCounter}_${Date.now()}`;
+async function initMsgCounter() {
+  try {
+    const data = await chrome.storage.session.get('msgCounter');
+    msgCounter = (data.msgCounter || 0) + 1000;
+  } catch (_) {
+    msgCounter = Math.floor(Math.random() * 100000);
+  }
 }
+function nextId() {
+  const id = `msg_${++msgCounter}_${Date.now()}`;
+  try { chrome.storage.session.set({ msgCounter }); } catch (_) {}
+  return id;
+}
+initMsgCounter();
 
 // ---------------------------------------------------------------------------
 // Pending callbacks keyed by message id
@@ -86,14 +111,24 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
       return;
     }
   }
-  bgLog('warn', 'Tab navigated during active operation — cancelling', { tabId, msgId });
+  cancelTabOp(tabId, msgId, 'Tab navigated during active operation — cancelling');
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  const msgId = activeTabOps.get(tabId);
+  if (!msgId) return;
+  cancelTabOp(tabId, msgId, 'Tab closed during active operation — cancelling');
+});
+
+function cancelTabOp(tabId, msgId, reason) {
+  bgLog('warn', reason, { tabId, msgId });
   const entry = pendingCallbacks.get(msgId);
   if (entry) {
     pendingCallbacks.delete(msgId);
     activeTabOps.delete(tabId);
     entry.cancel();
   }
-});
+}
 
 // ---------------------------------------------------------------------------
 // Pick an x.com tab: active tab if any, otherwise first match
@@ -113,6 +148,19 @@ function sendToContent(tabId, type, payload = {}, onStream = null) {
   return new Promise((resolve, reject) => {
     const id = nextId();
 
+    const isLongOp = type === 'FETCH_FOLLOWING' || type === 'ENRICH_ACTIVITY' || type === 'UNFOLLOW';
+    const timeoutMs = isLongOp ? 0 : (type === 'PING' ? 10000 : 60000);
+
+    let timer = null;
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        pendingCallbacks.delete(id);
+        if (activeTabOps.get(tabId) === id) activeTabOps.delete(tabId);
+        bgLog('warn', `sendToContent timeout for ${type}`, { tabId, id });
+        reject(new Error(`Operation ${type} timed out`));
+      }, timeoutMs);
+    }
+
     const entry = {
       fn: (reply) => {
         const isStream =
@@ -124,9 +172,10 @@ function sendToContent(tabId, type, payload = {}, onStream = null) {
 
         if (isStream) {
           onStream?.(reply);
-          return false; // keep alive
+          return false;
         }
 
+        if (timer) clearTimeout(timer);
         pendingCallbacks.delete(id);
         if (activeTabOps.get(tabId) === id) activeTabOps.delete(tabId);
         if (reply.type === 'ERROR') {
@@ -136,9 +185,10 @@ function sendToContent(tabId, type, payload = {}, onStream = null) {
         }
         return true;
       },
-      // Called when the tab navigates mid-operation — resolves as cancelled so
-      // the handler can still call sendResponse and clean up gracefully.
-      cancel: () => resolve({ type: 'FETCH_CANCELLED' }),
+      cancel: () => {
+        if (timer) clearTimeout(timer);
+        resolve({ type: 'FETCH_CANCELLED' });
+      },
     };
 
     pendingCallbacks.set(id, entry);

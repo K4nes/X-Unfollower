@@ -22,8 +22,9 @@ const RATE_LIMIT_BACKOFF_MS = 65000;
 // ---------------------------------------------------------------------------
 
 let capturedBearerToken = null;
-let cancelFetch = false;
-let cancelUnfollow = false;
+let usingFallbackToken = false;
+let fetchGeneration = 0;
+let unfollowGeneration = 0;
 
 // ---------------------------------------------------------------------------
 // Debug logger
@@ -43,7 +44,7 @@ function dbg(level, message, data) {
   console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](
     `[XUnfollower] ${message}`, data ?? ''
   );
-  window.postMessage(entry, '*');
+  window.postMessage(entry, location.origin);
 }
 
 // ---------------------------------------------------------------------------
@@ -149,19 +150,14 @@ async function searchExternalScripts() {
 
     if (url.includes('/i/api/')) {
       let auth = null;
-      let txId = null;
       try {
         if (req instanceof Request) {
           auth = req.headers.get('authorization');
-          txId = req.headers.get('x-client-transaction-id');
         } else if (init?.headers) {
           const h = init.headers;
           auth = (h instanceof Headers)
             ? h.get('authorization')
             : (h['authorization'] || h['Authorization'] || null);
-          txId = (h instanceof Headers)
-            ? h.get('x-client-transaction-id')
-            : (h['x-client-transaction-id'] || null);
         }
       } catch (_) {}
 
@@ -169,10 +165,6 @@ async function searchExternalScripts() {
         capturedBearerToken = auth.slice(7);
         dbg('info', 'Bearer token captured from live page traffic',
           { prefix: capturedBearerToken.slice(0, 16) + '…' });
-      }
-      if (txId) {
-        dbg('info', 'x-client-transaction-id captured from live page traffic',
-          { prefix: txId.slice(0, 16) + '…' });
       }
     }
 
@@ -197,6 +189,7 @@ async function acquireBearerToken() {
   }
 
   dbg('warn', 'All token discovery methods failed — using hardcoded fallback');
+  usingFallbackToken = true;
   return FALLBACK_BEARER_TOKEN;
 }
 
@@ -342,14 +335,14 @@ async function fetchFollowingPage(userId, cursor) {
   return { users, nextCursor };
 }
 
-async function fetchAllFollowing(userId, onProgress) {
+async function fetchAllFollowing(userId, onProgress, gen) {
   const all = [];
   let cursor = null;
   let page = 0;
   dbg('info', 'fetchAllFollowing start', { userId });
 
   while (true) {
-    if (cancelFetch) throw { type: 'CANCELLED' };
+    if (fetchGeneration > gen) throw { type: 'CANCELLED' };
 
     let result;
     try {
@@ -407,73 +400,182 @@ async function fetchLastTweetDate(userId, includeRts = false) {
   }
 }
 
+async function fetchLastTweetDateWithHeaders(userId, includeRts = false) {
+  const params = new URLSearchParams({
+    user_id: userId,
+    count: '1',
+    include_rts: includeRts ? '1' : '0',
+    exclude_replies: '0',
+    tweet_mode: 'extended',
+  });
+
+  const url = `https://x.com/i/api/1.1/statuses/user_timeline.json?${params}`;
+  const shortUrl = url.split('?')[0];
+  dbg('info', `→ GET ${shortUrl}`, { userId });
+
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { ...buildHeaders() },
+      credentials: 'include',
+    });
+  } catch (netErr) {
+    dbg('error', `Network error: ${shortUrl}`, { message: netErr.message });
+    throw netErr;
+  }
+
+  if (res.status === 429) {
+    const resetTs = res.headers.get('x-rate-limit-reset');
+    const waitMs = resetTs
+      ? Math.max(0, Number(resetTs) * 1000 - Date.now()) + 2000
+      : RATE_LIMIT_BACKOFF_MS;
+    dbg('warn', `Rate limited: ${shortUrl}`, { waitMs });
+    throw { type: 'RATE_LIMIT', waitMs };
+  }
+
+  if (res.status === 401) {
+    capturedBearerToken = null;
+    throw new Error('401 — authentication failed');
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+
+  const text = await res.text().catch(() => '');
+  if (!text.trim()) return { date: null, response: res };
+
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (_) {
+    return { date: null, response: res };
+  }
+
+  if (Array.isArray(json) && json.length > 0 && json[0].created_at) {
+    return { date: new Date(json[0].created_at).toISOString(), response: res };
+  }
+  return { date: null, response: res };
+}
+
 // ---------------------------------------------------------------------------
-// Enrich following list with last tweet dates
+// Enrich following list with last tweet dates — parallel with concurrency pool
 // ---------------------------------------------------------------------------
 
-async function enrichWithActivity(users, onProgress) {
-  dbg('info', 'enrichWithActivity start', { count: users.length });
+const ENRICH_CONCURRENCY = 5;
+const RATE_LIMIT_SAFETY_BUFFER = 50;
 
-  for (let i = 0; i < users.length; i++) {
-    if (cancelFetch) throw { type: 'CANCELLED' };
+function createPool(concurrency) {
+  const queue = [];
+  let running = 0;
+  function drain() {
+    while (running < concurrency && queue.length) {
+      running++;
+      const task = queue.shift();
+      task().finally(() => { running--; drain(); });
+    }
+  }
+  return (fn) => new Promise((resolve, reject) => {
+    queue.push(() => fn().then(resolve, reject));
+    drain();
+  });
+}
 
-    const user = users[i];
+async function enrichWithActivity(users, onProgress, gen) {
+  dbg('info', 'enrichWithActivity start', { count: users.length, concurrency: ENRICH_CONCURRENCY });
+
+  const completed = new Uint8Array(users.length);
+  let completedCount = 0;
+  let globalRateLimitRemaining = 900;
+  let globalRateLimitReset = 0;
+
+  function reportProgress(user, idx) {
+    onProgress({ phase: 'enrich', index: idx, total: users.length, user });
+  }
+
+  function handleRateLimitHeaders(res) {
+    const remaining = res.headers?.get('x-rate-limit-remaining');
+    const reset = res.headers?.get('x-rate-limit-reset');
+    if (remaining !== null && remaining !== undefined) {
+      globalRateLimitRemaining = parseInt(remaining, 10) || 0;
+    }
+    if (reset !== null && reset !== undefined) {
+      globalRateLimitReset = parseInt(reset, 10) * 1000;
+    }
+  }
+
+  async function waitForRateLimitReset() {
+    const waitMs = globalRateLimitReset
+      ? Math.max(0, globalRateLimitReset - Date.now()) + 2000
+      : RATE_LIMIT_BACKOFF_MS;
+    dbg('info', 'Rate limit safety buffer reached, pausing pool', { waitMs, remaining: globalRateLimitRemaining });
+    onProgress({ phase: 'rate_limit', waitMs });
+    await sleep(waitMs);
+    globalRateLimitRemaining = 900;
+  }
+
+  const pool = createPool(ENRICH_CONCURRENCY);
+
+  await Promise.all(users.map((user, i) => pool(async () => {
+    if (fetchGeneration > gen) return;
+
     if (user.activityChecked !== undefined) {
-      // Already enriched from a previous fetch.
-      // If we have a concrete answer (has date, 0 tweets, or protected), skip.
-      // If it's an Unknown (checked but no lastTweetAt), fall through to retry.
       if (user.lastTweetAt || user.statusesCount === 0 || user.protected) {
-        onProgress({ phase: 'enrich', index: i, total: users.length, user });
-        continue;
+        reportProgress(user, i);
+        return;
       }
     }
+
     if (user.protected) {
       user.lastTweetAt = null;
-      user.activityChecked = false; // can't check protected accounts
+      user.activityChecked = false;
     } else if (user.statusesCount === 0) {
       user.lastTweetAt = null;
-      user.activityChecked = true; // 0 tweets is a definitive answer
+      user.activityChecked = true;
     } else {
       let retries = 0;
       let emptyTries = 0;
       while (retries < 3 && emptyTries < 3) {
+        if (fetchGeneration > gen) return;
+
+        if (globalRateLimitRemaining < RATE_LIMIT_SAFETY_BUFFER) {
+          await waitForRateLimitReset();
+        }
+
         try {
-          const ts = await fetchLastTweetDate(user.id);
-          if (ts) {
-            user.lastTweetAt = ts;
+          const { date, response } = await fetchLastTweetDateWithHeaders(user.id);
+          if (response) handleRateLimitHeaders(response);
+          globalRateLimitRemaining--;
+
+          if (date) {
+            user.lastTweetAt = date;
             user.activityChecked = true;
             break;
           }
-          // Got no usable tweet date back — wait a bit and try again
           emptyTries++;
           if (emptyTries >= 3) {
-            // No original posts found — try once with retweets included to get any
-            // last-activity date. Fall back to the retweet date captured from
-            // friends/list if that also returns nothing.
             try {
-              const rtTs = await fetchLastTweetDate(user.id, true);
-              user.lastTweetAt = rtTs || user.lastRetweetAt || null;
+              const rtResult = await fetchLastTweetDateWithHeaders(user.id, true);
+              if (rtResult.response) handleRateLimitHeaders(rtResult.response);
+              user.lastTweetAt = rtResult.date || user.lastRetweetAt || null;
             } catch (_) {
               user.lastTweetAt = user.lastRetweetAt || null;
             }
             user.activityChecked = true;
             break;
           }
-          const waitMs = 5000;
           dbg('info', 'fetchLastTweetDate returned empty, retrying after delay', {
             userId: user.id,
             emptyTries,
-            waitMs,
           });
-          await sleep(waitMs);
+          await sleep(2000);
         } catch (err) {
           if (err.type === 'RATE_LIMIT') {
-            onProgress({ phase: 'rate_limit', waitMs: err.waitMs, index: i });
+            onProgress({ phase: 'rate_limit', waitMs: err.waitMs });
             await sleep(err.waitMs);
             retries++;
           } else {
-            // API error (suspended, restricted, etc.) — use the retweet date from
-            // friends/list if we have one; otherwise mark as unknown.
             user.lastTweetAt = user.lastRetweetAt || null;
             user.activityChecked = true;
             break;
@@ -482,9 +584,8 @@ async function enrichWithActivity(users, onProgress) {
       }
     }
 
-    onProgress({ phase: 'enrich', index: i, total: users.length, user });
-    await sleep(150);
-  }
+    reportProgress(user, i);
+  })));
 
   dbg('info', 'enrichWithActivity complete', { count: users.length });
   return users;
@@ -510,14 +611,14 @@ async function unfollowUser(userId) {
   dbg('info', 'unfollowed', { userId });
 }
 
-async function unfollowQueue(userIds, onProgress) {
+async function unfollowQueue(userIds, onProgress, gen) {
   let done = 0;
   const failed = [];
   const errors = {};
   dbg('info', 'unfollowQueue start', { count: userIds.length });
 
   for (const userId of userIds) {
-    if (cancelUnfollow) {
+    if (unfollowGeneration > gen) {
       onProgress({ phase: 'unfollow_cancelled', done, total: userIds.length, failed, errors });
       return;
     }
@@ -569,7 +670,7 @@ window.addEventListener('message', async (event) => {
   if (!msg || msg.direction !== 'FROM_EXTENSION') return;
 
   const reply = (data) =>
-    window.postMessage({ direction: 'FROM_PAGE', id: msg.id, ...data }, '*');
+    window.postMessage({ direction: 'FROM_PAGE', id: msg.id, ...data }, location.origin);
 
   dbg('info', `← msg: ${msg.type}`);
 
@@ -584,7 +685,7 @@ window.addEventListener('message', async (event) => {
         csrfPresent: !!getCsrfToken(),
         capturedToken: !!capturedBearerToken,
       });
-      reply({ type: 'PONG', loggedIn, userId, tokenReady: !!capturedBearerToken });
+      reply({ type: 'PONG', loggedIn, userId, tokenReady: !!capturedBearerToken, usingFallback: usingFallbackToken });
       break;
     }
 
@@ -596,14 +697,13 @@ window.addEventListener('message', async (event) => {
         return;
       }
 
-      // Acquire bearer token using all available strategies
       await acquireBearerToken();
 
-      cancelFetch = false;
+      const gen = ++fetchGeneration;
       try {
         const users = await fetchAllFollowing(userId, (p) =>
           reply({ type: 'FETCH_PROGRESS', progress: p })
-        );
+        , gen);
         reply({ type: 'FETCH_FOLLOWING_DONE', users });
       } catch (err) {
         if (err.type === 'CANCELLED') {
@@ -616,11 +716,11 @@ window.addEventListener('message', async (event) => {
     }
 
     case 'ENRICH_ACTIVITY': {
-      cancelFetch = false;
+      const gen = ++fetchGeneration;
       try {
         const enriched = await enrichWithActivity(msg.users, (p) =>
           reply({ type: 'ENRICH_PROGRESS', progress: p })
-        );
+        , gen);
         reply({ type: 'ENRICH_DONE', users: enriched });
       } catch (err) {
         if (err.type === 'CANCELLED') {
@@ -633,13 +733,12 @@ window.addEventListener('message', async (event) => {
     }
 
     case 'UNFOLLOW': {
-      cancelUnfollow = false;
+      const gen = ++unfollowGeneration;
       try {
-        // Re-acquire bearer token so we use a token from this page (not just fallback)
         await acquireBearerToken();
         await unfollowQueue(msg.userIds, (p) =>
           reply({ type: 'UNFOLLOW_PROGRESS', progress: p })
-        );
+        , gen);
       } catch (err) {
         reply({ type: 'ERROR', error: err.message || String(err) });
       }
@@ -647,14 +746,14 @@ window.addEventListener('message', async (event) => {
     }
 
     case 'CANCEL_FETCH':
-      cancelFetch = true;
-      dbg('info', 'cancelFetch set');
+      fetchGeneration++;
+      dbg('info', 'CANCEL_FETCH: fetchGeneration incremented', { fetchGeneration });
       reply({ type: 'OK' });
       break;
 
     case 'CANCEL_UNFOLLOW':
-      cancelUnfollow = true;
-      dbg('info', 'cancelUnfollow set');
+      unfollowGeneration++;
+      dbg('info', 'CANCEL_UNFOLLOW: unfollowGeneration incremented', { unfollowGeneration });
       reply({ type: 'OK' });
       break;
 

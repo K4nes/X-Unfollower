@@ -41,12 +41,12 @@ Side panel ──► background.js ──► bridge.js ──► content.js (x.c
 
 ## Rate limits
 
-Handled automatically (pause + countdown, then resume).
+Handled automatically (pause + countdown, then resume). Activity checks run **5 concurrent requests** with rate-limit-aware throttling.
 
 | Operation | Rough limit |
 |-----------|-------------|
 | Following list | ~15 pages (~3k accounts) / 15 min |
-| Activity check | ~1 request per account, small gap between calls |
+| Activity check | ~5 requests at a time; 900 / 15 min window; auto-pauses near limit |
 | Unfollow | 1 every 2s; very high daily volume may risk flags from X |
 
 Large lists can take several minutes; partial results stay in local storage if you cancel.
@@ -55,8 +55,10 @@ Large lists can take several minutes; partial results stay in local storage if y
 
 - **No extra servers** — traffic is your browser ↔ `x.com` (and `twitter.com` URLs).
 - Tokens come from your session, same as the site.
-- Data lives in **`chrome.storage.local`** only.
+- Data lives in **`chrome.storage.local`** only (with `unlimitedStorage` for large follow lists).
 - Debug logs redact sensitive keys.
+- `postMessage` calls use origin-scoped targets (not wildcards).
+- No inline event handlers — all DOM binding via `addEventListener`.
 - **Scan:** [VirusTotal report](https://www.virustotal.com/gui/file/8007fe3841f9b90777fe1f29461f2558843b255c52d6e3a2673835d882409320) for a published build (hash on that page).
 
 ## Notes

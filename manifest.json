@@ -36,7 +36,7 @@
       "world": "ISOLATED"
     }
   ],
-  "permissions": ["storage", "tabs", "scripting", "sidePanel", "alarms"],
+  "permissions": ["storage", "tabs", "scripting", "sidePanel", "alarms", "unlimitedStorage"],
   "host_permissions": [
     "https://x.com/*",
     "https://twitter.com/*"
