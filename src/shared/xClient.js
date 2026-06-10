@@ -139,6 +139,4 @@ class XClient {
   }
 }
 
-if (typeof module !== 'undefined') {
-  module.exports = XClient;
-}
+export default XClient;

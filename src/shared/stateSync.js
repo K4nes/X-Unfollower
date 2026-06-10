@@ -46,6 +46,4 @@ const StateSync = {
   }
 };
 
-if (typeof module !== 'undefined') {
-  module.exports = StateSync;
-}
+export default StateSync;

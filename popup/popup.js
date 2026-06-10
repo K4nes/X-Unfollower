@@ -1,10 +1,9 @@
-import StateSync from '../src/shared/stateSync.js';
-
 /**
  * popup.js — Side panel UI.
  * Talks to background.js via chrome.runtime.sendMessage.
  */
 
+document.addEventListener('DOMContentLoaded', () => {
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -414,12 +413,17 @@ async function loadCachedData() {
 // ---------------------------------------------------------------------------
 // Fetch following
 // ---------------------------------------------------------------------------
-let stateSyncUnsubscribe = null;
+let stateSyncListener = null;
 
 function startProgressWatcher(storageKey, onUpdate) {
   stopProgressWatcher();
   if (storageKey === 'fetchProgress' || storageKey === 'enrichProgress' || storageKey === 'unfollowProgress') {
-    stateSyncUnsubscribe = StateSync.onMessage(storageKey, onUpdate);
+    stateSyncListener = (message) => {
+      if (message && message.direction === 'STATE_SYNC' && message.type === storageKey) {
+        onUpdate(message.data);
+      }
+    };
+    chrome.runtime.onMessage.addListener(stateSyncListener);
   } else {
     progressWatcher = setInterval(async () => {
       const data = await chrome.storage.local.get(storageKey);
@@ -429,9 +433,9 @@ function startProgressWatcher(storageKey, onUpdate) {
 }
 
 function stopProgressWatcher() {
-  if (stateSyncUnsubscribe) {
-    stateSyncUnsubscribe();
-    stateSyncUnsubscribe = null;
+  if (stateSyncListener) {
+    chrome.runtime.onMessage.removeListener(stateSyncListener);
+    stateSyncListener = null;
   }
   if (progressWatcher) { clearInterval(progressWatcher); progressWatcher = null; }
   if (rateLimitTimer) { clearInterval(rateLimitTimer); rateLimitTimer = null; }
@@ -814,3 +818,4 @@ async function init() {
 }
 
 init().catch(() => {});
+});

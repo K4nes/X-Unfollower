@@ -193,6 +193,4 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
   });
 }
 
-if (typeof module !== 'undefined') {
-  module.exports = CrossWorldMessenger;
-}
+export default CrossWorldMessenger;
