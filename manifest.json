@@ -20,18 +20,19 @@
     "default_path": "popup/popup.html"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background/background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
       "matches": ["https://x.com/*", "https://twitter.com/*"],
-      "js": ["content.js"],
+      "js": ["src/content/content.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
       "matches": ["https://x.com/*", "https://twitter.com/*"],
-      "js": ["bridge.js"],
+      "js": ["src/content/bridge.js"],
       "run_at": "document_start",
       "world": "ISOLATED"
     }

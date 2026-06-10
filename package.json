@@ -1,0 +1,24 @@
+{
+  "name": "x-unfollower",
+  "version": "1.0.0",
+  "description": "> Find and unfollow inactive accounts on X — no API key or paid service.",
+  "main": "background.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/K4nes/X-Unfollower.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/K4nes/X-Unfollower/issues"
+  },
+  "homepage": "https://github.com/K4nes/X-Unfollower#readme",
+  "devDependencies": {
+    "jest": "^30.4.2"
+  }
+}

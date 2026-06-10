@@ -1,3 +1,5 @@
+import StateSync from '../shared/stateSync.js';
+
 /**
  * background.js — Manifest V3 Service Worker
  *
@@ -257,7 +259,7 @@ async function handlePanelMessage(message, sendResponse) {
         bgLog('info', 'FETCH_FOLLOWING started', { tabId: tab.id });
 
         const reply = await sendToContent(tab.id, 'FETCH_FOLLOWING', {}, async (streamMsg) => {
-          await chrome.storage.local.set({ fetchProgress: streamMsg.progress });
+          StateSync.broadcastState('fetchProgress', streamMsg.progress);
         });
 
         if (reply.type === 'FETCH_FOLLOWING_DONE') {
@@ -313,7 +315,7 @@ async function handlePanelMessage(message, sendResponse) {
 
         const reply = await sendToContent(tab.id, 'ENRICH_ACTIVITY', { users }, async (streamMsg) => {
           const p = streamMsg.progress;
-          await chrome.storage.local.set({ enrichProgress: p });
+          StateSync.broadcastState('enrichProgress', p);
 
           // Persist each enriched user immediately and do a full list save every
           // 10 users so progress survives a tab refresh or cancel.
@@ -349,7 +351,7 @@ async function handlePanelMessage(message, sendResponse) {
         bgLog('info', 'UNFOLLOW started', { count: userIds?.length });
 
         const reply = await sendToContent(tab.id, 'UNFOLLOW', { userIds }, async (streamMsg) => {
-          await chrome.storage.local.set({ unfollowProgress: streamMsg.progress });
+          StateSync.broadcastState('unfollowProgress', streamMsg.progress);
         });
 
         bgLog('info', 'UNFOLLOW done', reply.progress);
